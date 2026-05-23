@@ -106,6 +106,10 @@ def main() -> None:
     g_score.add_argument("--max-beats", type=float, default=1.0,
                          metavar="BEATS",
                          help="楽譜上の最大音符長（拍）。0.5=8分音符まで")
+    g_score.add_argument(
+        "--quantize", type=float, default=0.0, metavar="BEATS",
+        help="クオンタイズグリッド（拍）。0=無効, 0.25=16分音符, 0.5=8分音符, 1.0=4分音符",
+    )
 
     # --- 中間ファイル制御 ---
     g_mid = parser.add_argument_group("中間ファイル")
@@ -209,4 +213,5 @@ def _run_pipeline(args, video_path: Path, output_path: Path, work_dir: Path) -> 
 
     # ── STEP 3: MIDI → PDF ────────────────────────────────────────────────
     print("\n[Step 3/3] 楽譜生成中...")
-    fix_and_export(str(piano_midi), str(output_path), max_beats=args.max_beats)
+    fix_and_export(str(piano_midi), str(output_path), max_beats=args.max_beats,
+                   quantize=args.quantize)

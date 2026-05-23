@@ -1,4 +1,4 @@
-"""
+""" 
 2トラック piano MIDI → PDF 楽譜 変換モジュール。
 
 piano_movie2midi の fix_mscz.py を元に、クロスプラットフォーム対応と
@@ -122,15 +122,78 @@ def _shorten_notes(midi_path: str, output_path: str, max_beats: float = 1.0) -> 
     out.save(output_path)
 
 
-def _prepare_midi(midi_path: str, output_path: str, max_beats: float = 1.0) -> None:
+def _quantize_midi(midi_path: str, output_path: str, grid_beats: float = 0.25) -> None:
+    """ノートのオンセット時刻を grid_beats 拍グリッドにスナップする。
+
+    grid_beats の目安:
+      0.125 = 32分音符グリッド
+      0.25  = 16分音符グリッド（デフォルト）
+      0.5   = 8分音符グリッド
+      1.0   = 4分音符グリッド
+    """
+    mid = mido.MidiFile(midi_path)
+    tpb = mid.ticks_per_beat
+    grid = max(1, round(grid_beats * tpb))
+    out = mido.MidiFile(ticks_per_beat=tpb)
+
+    for track in mid.tracks:
+        events: list[list] = []
+        abs_tick = 0
+        for msg in track:
+            abs_tick += msg.time
+            events.append([abs_tick, msg.copy(time=0)])
+
+        note_orig_on: dict[tuple, int] = {}
+        note_snapped_on: dict[tuple, int] = {}
+        new_events: list[list] = []
+
+        for abs_t, msg in events:
+            if msg.type == "note_on" and msg.velocity > 0:
+                key = (msg.channel, msg.note)
+                snapped = round(abs_t / grid) * grid
+                note_orig_on[key] = abs_t
+                note_snapped_on[key] = snapped
+                new_events.append([snapped, msg])
+            elif msg.type == "note_off" or (msg.type == "note_on" and msg.velocity == 0):
+                key = (msg.channel, msg.note)
+                if key in note_orig_on:
+                    duration = abs_t - note_orig_on.pop(key)
+                    snapped_on = note_snapped_on.pop(key)
+                    new_events.append([snapped_on + duration, msg])
+                else:
+                    new_events.append([abs_t, msg])
+            else:
+                new_events.append([abs_t, msg])
+
+        new_events.sort(key=lambda e: (e[0], 1 if (e[1].type == "note_on" and e[1].velocity > 0) else 0))
+
+        out_track = mido.MidiTrack()
+        out.tracks.append(out_track)
+        cur = 0
+        for abs_t, msg in new_events:
+            out_track.append(msg.copy(time=max(0, abs_t - cur)))
+            cur = abs_t
+
+    out.save(output_path)
+
+
+def _prepare_midi(midi_path: str, output_path: str, max_beats: float = 1.0,
+                  quantize: float = 0.0) -> None:
     """音符を短縮し、MuseScore が適切なト音/ヘ音記号を割り当てるよう
     右手 = Violin (program 40)、左手 = Cello (program 42) を設定する。
 
     MuseScore インポート後に fix_mscx() でラベルを「ピアノ 右手/左手」に書き換える。
     """
     with tempfile.TemporaryDirectory() as tmpdir:
+        src = midi_path
+
+        if quantize > 0:
+            quantized = str(Path(tmpdir) / "quantized.mid")
+            _quantize_midi(src, quantized, quantize)
+            src = quantized
+
         shortened = str(Path(tmpdir) / "short.mid")
-        _shorten_notes(midi_path, shortened, max_beats)
+        _shorten_notes(src, shortened, max_beats)
 
         mid = mido.MidiFile(shortened)
         programs = [40, 42]  # Violin, Cello
@@ -287,6 +350,7 @@ def fix_and_export(
     midi_path: str,
     output_path: str,
     max_beats: float = 1.0,
+    quantize: float = 0.0,
 ) -> None:
     """piano.mid (2トラック) → PDF 楽譜のメインパイプライン。
 
@@ -294,6 +358,8 @@ def fix_and_export(
         midi_path:   入力 MIDI ファイル（右手 ch0 + 左手 ch1）
         output_path: 出力 PDF ファイルパス
         max_beats:   最大音符長（拍）。デフォルト 1.0 = 四分音符まで
+        quantize:    クオンタイズグリッド（拍）。0 で無効。
+                     例: 0.25 = 16分音符, 0.5 = 8分音符, 1.0 = 4分音符
     """
     midi_path = Path(midi_path)
     output_path = Path(output_path)
@@ -303,8 +369,10 @@ def fix_and_export(
 
     with tempfile.TemporaryDirectory() as tmpdir:
         prepared = str(Path(tmpdir) / "prepared.mid")
+        if quantize > 0:
+            print(f"  クオンタイズ中 (grid={quantize}拍)...")
         print("  音符長を整形中...")
-        _prepare_midi(str(midi_path), prepared, max_beats)
+        _prepare_midi(str(midi_path), prepared, max_beats, quantize)
 
         mscore = _find_musescore()
         if mscore:
@@ -335,6 +403,10 @@ def main() -> None:
     parser.add_argument("--out", default="piano.pdf", help="出力 PDF ファイル")
     parser.add_argument("--max-beats", type=float, default=1.0,
                         help="最大音符長（拍）")
+    parser.add_argument(
+        "--quantize", type=float, default=0.0, metavar="BEATS",
+        help="クオンタイズグリッド（拍）。0=無効, 0.25=16分音符, 0.5=8分音符, 1.0=4分音符",
+    )
     args = parser.parse_args()
 
     if not Path(args.input).exists():
@@ -342,7 +414,7 @@ def main() -> None:
               file=sys.stderr)
         raise SystemExit(1)
 
-    fix_and_export(args.input, args.out, max_beats=args.max_beats)
+    fix_and_export(args.input, args.out, max_beats=args.max_beats, quantize=args.quantize)
     print(f"完了: {args.out}")
 
 
