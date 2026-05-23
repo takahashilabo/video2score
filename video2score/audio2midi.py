@@ -73,8 +73,17 @@ def _piano_compat_patch() -> None:
 
     def _resample(y, orig_sr, target_sr, res_type="kaiser_best",
                   fix=True, scale=False, **kwargs):
-        return librosa.resample(y, orig_sr=orig_sr, target_sr=target_sr,
-                                res_type=res_type, fix=fix, scale=scale, **kwargs)
+        if orig_sr == target_sr:
+            return y
+        # librosa.resample を呼ぶと再帰ループになるため resampy/scipy を直接使う
+        try:
+            import resampy
+            return resampy.resample(y, orig_sr, target_sr).astype(y.dtype)
+        except ImportError:
+            pass
+        import scipy.signal
+        n = int(round(y.shape[-1] * target_sr / orig_sr))
+        return scipy.signal.resample(y, n, axis=-1).astype(y.dtype)
 
     audio_mod = types.ModuleType("librosa.core.audio")
     audio_mod.util = types.SimpleNamespace(buf_to_float=_buf_to_float)
