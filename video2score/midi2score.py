@@ -143,23 +143,24 @@ def _quantize_midi(midi_path: str, output_path: str, grid_beats: float = 0.25) -
             abs_tick += msg.time
             events.append([abs_tick, msg.copy(time=0)])
 
-        note_orig_on: dict[tuple, int] = {}
-        note_snapped_on: dict[tuple, int] = {}
+        # list を使って同じ音程の反復音を FIFO で正しく対応する
+        note_orig_on: dict[tuple, list[int]] = {}
+        note_snapped_on: dict[tuple, list[int]] = {}
         new_events: list[list] = []
 
         for abs_t, msg in events:
             if msg.type == "note_on" and msg.velocity > 0:
                 key = (msg.channel, msg.note)
                 snapped = round(abs_t / grid) * grid
-                note_orig_on[key] = abs_t
-                note_snapped_on[key] = snapped
+                note_orig_on.setdefault(key, []).append(abs_t)
+                note_snapped_on.setdefault(key, []).append(snapped)
                 new_events.append([snapped, msg])
             elif msg.type == "note_off" or (msg.type == "note_on" and msg.velocity == 0):
                 key = (msg.channel, msg.note)
-                if key in note_orig_on:
-                    duration = abs_t - note_orig_on.pop(key)
-                    snapped_on = note_snapped_on.pop(key)
-                    new_events.append([snapped_on + duration, msg])
+                if note_orig_on.get(key):
+                    orig_on = note_orig_on[key].pop(0)
+                    snapped_on = note_snapped_on[key].pop(0)
+                    new_events.append([snapped_on + (abs_t - orig_on), msg])
                 else:
                     new_events.append([abs_t, msg])
             else:
