@@ -50,7 +50,9 @@ def _piano_compat_patch() -> None:
     """piano_transcription_inference が librosa >= 0.10 で動作するための互換パッチ。
 
     librosa 0.10 以降で librosa.core.audio サブモジュールが削除されたため、
-    piano_transcription_inference が使う buf_to_float の旧パスを再現する。
+    piano_transcription_inference が使う旧パスの関数を再現する:
+      - librosa.core.audio.util.buf_to_float
+      - librosa.core.audio.resample
     """
     import sys
     import types
@@ -64,12 +66,19 @@ def _piano_compat_patch() -> None:
         return (scale * np.frombuffer(x, f"<i{n_bytes}")).astype(dtype)
 
     try:
+        import librosa
         import librosa.core
     except ImportError:
         return
 
+    def _resample(y, orig_sr, target_sr, res_type="kaiser_best",
+                  fix=True, scale=False, **kwargs):
+        return librosa.resample(y, orig_sr=orig_sr, target_sr=target_sr,
+                                res_type=res_type, fix=fix, scale=scale, **kwargs)
+
     audio_mod = types.ModuleType("librosa.core.audio")
     audio_mod.util = types.SimpleNamespace(buf_to_float=_buf_to_float)
+    audio_mod.resample = _resample
     sys.modules["librosa.core.audio"] = audio_mod
     librosa.core.__dict__["audio"] = audio_mod
 
