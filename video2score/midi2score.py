@@ -165,16 +165,13 @@ def _prepare_midi(midi_path: str, output_path: str, max_beats: float = 1.0) -> N
 # ---------------------------------------------------------------------------
 
 def _fix_mscx(content: str) -> str:
-    """MSCZ 内の MSCX XML から楽器名ラベルを削除する。"""
-    replacements = [
-        (r"<longName>\s*Violin\s*</longName>",      "<longName></longName>"),
-        (r"<shortName>\s*Vln\.\s*</shortName>",      "<shortName></shortName>"),
-        (r"<longName>\s*Violoncello\s*</longName>",  "<longName></longName>"),
-        (r"<longName>\s*Cello\s*</longName>",        "<longName></longName>"),
-        (r"<shortName>\s*Vc\.\s*</shortName>",       "<shortName></shortName>"),
-    ]
-    for pattern, replacement in replacements:
-        content = re.sub(pattern, replacement, content)
+    """MSCZ 内の MSCX XML からすべての楽器名ラベルを削除する。
+
+    MuseScore のバージョンによって楽器名が異なるため（Violin/Treble Viol 等）、
+    特定名を狙わずすべての longName / shortName を空にする。
+    """
+    content = re.sub(r"<longName>[^<]*</longName>", "<longName></longName>", content)
+    content = re.sub(r"<shortName>[^<]*</shortName>", "<shortName></shortName>", content)
     return content
 
 
