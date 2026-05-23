@@ -46,13 +46,42 @@ def transcribe_basic_pitch(
     midi_data.write(str(output_path))
 
 
+def _piano_compat_patch() -> None:
+    """piano_transcription_inference が librosa >= 0.10 で動作するための互換パッチ。
+
+    librosa 0.10 以降で librosa.core.audio サブモジュールが削除されたため、
+    piano_transcription_inference が使う buf_to_float の旧パスを再現する。
+    """
+    import sys
+    import types
+    import numpy as np
+
+    if "librosa.core.audio" in sys.modules:
+        return
+
+    def _buf_to_float(x, n_bytes: int = 2, dtype=np.float32):
+        scale = 1.0 / float(1 << (8 * n_bytes - 1))
+        return (scale * np.frombuffer(x, f"<i{n_bytes}")).astype(dtype)
+
+    try:
+        import librosa.core
+    except ImportError:
+        return
+
+    audio_mod = types.ModuleType("librosa.core.audio")
+    audio_mod.util = types.SimpleNamespace(buf_to_float=_buf_to_float)
+    sys.modules["librosa.core.audio"] = audio_mod
+    librosa.core.__dict__["audio"] = audio_mod
+
+
 def transcribe_piano(audio_path: str, output_path: str) -> None:
-    """piano-transcription-inference モデルで音声を MIDI に変換する（ピアノ専用・高精度）。
+    """ピアノ豜音特化モデルで音声を MIDI に変換する（ピアノ専用・高精度）。
 
     使用には `pip install video2score[piano]` が必要。
     """
     try:
         import torch
+        _piano_compat_patch()
         from piano_transcription_inference import PianoTranscription, sample_rate, load_audio
     except ImportError:
         raise ImportError(
