@@ -5,7 +5,7 @@ video2score: ピアノ演奏動画 → 両手ピアノ譜（大譜表 PDF）
     video2score performance.mp4                        # ローカル動画ファイル
     video2score https://www.youtube.com/watch?v=XXXX  # YouTube URL
     video2score performance.mp4 -o score.pdf           # 出力先指定
-    video2score performance.mp4 --model piano          # 高精度モデル使用
+    video2score performance.mp4 --model basic-pitch    # 汎用モデル使用
     video2score performance.mp4 --keep-midi            # 中間 MIDI ファイルを保持
 
 パイプライン:
@@ -85,8 +85,8 @@ def main() -> None:
     # --- 音声変換オプション ---
     g_trans = parser.add_argument_group("音声→MIDI 変換オプション")
     g_trans.add_argument(
-        "--model", choices=["basic-pitch", "piano"], default="basic-pitch",
-        help="変換モデル: basic-pitch（汎用）/ piano（ピアノ専用・要 torch）",
+        "--model", choices=["basic-pitch", "piano"], default="piano",
+        help="変換モデル: piano（ピアノ専用・要 torch）/ basic-pitch（汎用）",
     )
     g_trans.add_argument("--onset-threshold", type=float, default=0.5,
                          metavar="THR", help="[basic-pitch] オンセット検出しきい値")
