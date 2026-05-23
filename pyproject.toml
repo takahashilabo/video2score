@@ -20,6 +20,7 @@ dependencies = [
     "setuptools<81",
     "soundfile>=0.12.0",
     "verovio>=4.0.0",
+    "yt-dlp>=2024.1.0",
 ]
 
 [project.optional-dependencies]
