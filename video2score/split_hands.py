@@ -148,11 +148,63 @@ def _note_to_x(note_num: int, keyboard: dict) -> float:
 
 
 # ---------------------------------------------------------------------------
-# MediaPipe 手検出
+# MediaPipe 手検出（旧 solutions API / 新 Tasks API 両対応）
 # ---------------------------------------------------------------------------
 
-def _detect_hands(frame: np.ndarray, detector) -> Optional[tuple[float, float]]:
-    """フレーム中の両手の X 座標 (left_x, right_x) を返す。片手のみの場合 None。"""
+def _ensure_hand_model() -> str:
+    """hand_landmarker.task モデルをキャッシュしてパスを返す（Tasks API 用）。"""
+    import urllib.request
+
+    cache_dir = Path.home() / ".cache" / "video2score"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    model_path = cache_dir / "hand_landmarker.task"
+
+    if not model_path.exists():
+        url = ("https://storage.googleapis.com/mediapipe-models/"
+               "hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task")
+        print(f"  手検出モデルをダウンロード中 (初回のみ)...")
+        urllib.request.urlretrieve(url, str(model_path))
+        print(f"  ダウンロード完了: {model_path}")
+
+    return str(model_path)
+
+
+def _setup_hands_detector():
+    """mediapipe のバージョンに応じた手検出器と検出関数を返す。
+
+    Returns:
+        (detector, detect_fn): 検出器と Optional[tuple] を返す関数
+    """
+    # 旧 solutions API を試みる (mediapipe < 0.10.14 程度)
+    try:
+        mp_hands = mp.solutions.hands
+        detector = mp_hands.Hands(
+            static_image_mode=True,
+            max_num_hands=2,
+            min_detection_confidence=0.5,
+        )
+        return detector, _detect_hands_solutions
+    except AttributeError:
+        pass
+
+    # 新 Tasks API (mediapipe 0.10.14+)
+    from mediapipe.tasks import python as mp_python
+    from mediapipe.tasks.python import vision
+
+    model_path = _ensure_hand_model()
+    base_options = mp_python.BaseOptions(model_asset_path=model_path)
+    options = vision.HandLandmarkerOptions(
+        base_options=base_options,
+        num_hands=2,
+        min_hand_detection_confidence=0.5,
+        running_mode=vision.RunningMode.IMAGE,
+    )
+    detector = vision.HandLandmarker.create_from_options(options)
+    return detector, _detect_hands_tasks
+
+
+def _detect_hands_solutions(frame: np.ndarray, detector) -> Optional[tuple[float, float]]:
+    """旧 solutions API でフレーム中の両手 X 座標を返す。"""
     rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     result = detector.process(rgb)
 
@@ -160,13 +212,22 @@ def _detect_hands(frame: np.ndarray, detector) -> Optional[tuple[float, float]]:
         return None
 
     h, w = frame.shape[:2]
-    xs = []
-    for lm in result.multi_hand_landmarks:
-        # 手首 (landmark 0) の X 座標
-        xs.append(lm.landmark[0].x * w)
+    xs = sorted(lm.landmark[0].x * w for lm in result.multi_hand_landmarks)
+    return xs[0], xs[1]
 
-    xs.sort()
-    return xs[0], xs[1]  # (left_x, right_x)
+
+def _detect_hands_tasks(frame: np.ndarray, detector) -> Optional[tuple[float, float]]:
+    """新 Tasks API でフレーム中の両手 X 座標を返す。"""
+    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+    result = detector.detect(mp_image)
+
+    if not result.hand_landmarks or len(result.hand_landmarks) < 2:
+        return None
+
+    h, w = frame.shape[:2]
+    xs = sorted(lms[0].x * w for lms in result.hand_landmarks)
+    return xs[0], xs[1]
 
 
 # ---------------------------------------------------------------------------
@@ -298,22 +359,21 @@ def split_hands(
 
     # 手検出（連続フレームは seek せず順次読み込み）
     print(f"  手検出中 ({len(needed)} フレーム)...")
-    mp_hands = mp.solutions.hands
+    detector, detect_fn = _setup_hands_detector()
     hand_at: dict[int, Optional[tuple]] = {}
 
-    with mp_hands.Hands(
-        static_image_mode=True,
-        max_num_hands=2,
-        min_detection_confidence=0.5,
-    ) as detector:
+    try:
         expected_next = -1
         for fi in sorted(needed):
             if fi != expected_next:
                 cap.set(cv2.CAP_PROP_POS_FRAMES, fi)
             ret, frame = cap.read()
             if ret:
-                hand_at[fi] = _detect_hands(frame, detector)
+                hand_at[fi] = detect_fn(frame, detector)
             expected_next = fi + 1
+    finally:
+        if hasattr(detector, "close"):
+            detector.close()
 
     cap.release()
 
