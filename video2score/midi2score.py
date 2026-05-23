@@ -165,13 +165,13 @@ def _prepare_midi(midi_path: str, output_path: str, max_beats: float = 1.0) -> N
 # ---------------------------------------------------------------------------
 
 def _fix_mscx(content: str) -> str:
-    """MSCZ 内の MSCX XML を書き換えてパート名をピアノ左右手に変更する。"""
+    """MSCZ 内の MSCX XML から楽器名ラベルを削除する。"""
     replacements = [
-        (r"<longName>\s*Violin\s*</longName>",      "<longName>Piano, Right Hand</longName>"),
-        (r"<shortName>\s*Vln\.\s*</shortName>",      "<shortName>R.H.</shortName>"),
-        (r"<longName>\s*Violoncello\s*</longName>",  "<longName>Piano, Left Hand</longName>"),
-        (r"<longName>\s*Cello\s*</longName>",        "<longName>Piano, Left Hand</longName>"),
-        (r"<shortName>\s*Vc\.\s*</shortName>",       "<shortName>L.H.</shortName>"),
+        (r"<longName>\s*Violin\s*</longName>",      "<longName></longName>"),
+        (r"<shortName>\s*Vln\.\s*</shortName>",      "<shortName></shortName>"),
+        (r"<longName>\s*Violoncello\s*</longName>",  "<longName></longName>"),
+        (r"<longName>\s*Cello\s*</longName>",        "<longName></longName>"),
+        (r"<shortName>\s*Vc\.\s*</shortName>",       "<shortName></shortName>"),
     ]
     for pattern, replacement in replacements:
         content = re.sub(pattern, replacement, content)
@@ -239,11 +239,9 @@ def _export_verovio(midi_path: str, output_path: str) -> bool:
 
     try:
         score = music21.converter.parse(midi_path)
-        parts = list(score.parts)
-        labels = ["Piano, Right Hand", "Piano, Left Hand"]
-        for part, label in zip(parts, labels):
-            part.partName = label
-            part.partAbbreviation = label.split(", ")[1][:4] + "."
+        for part in score.parts:
+            part.partName = ""
+            part.partAbbreviation = ""
 
         with tempfile.TemporaryDirectory() as tmpdir:
             xml_path = str(Path(tmpdir) / "score.xml")
