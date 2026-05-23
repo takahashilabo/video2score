@@ -103,9 +103,9 @@ def main() -> None:
 
     # --- 楽譜生成オプション ---
     g_score = parser.add_argument_group("楽譜生成オプション")
-    g_score.add_argument("--max-beats", type=float, default=1.0,
+    g_score.add_argument("--max-beats", type=float, default=0.5,
                          metavar="BEATS",
-                         help="楽譜上の最大音符長（拍）。0.5=8分音符まで")
+                         help="楽譜上の最大音符長（拍）。小さいほどタイが減る。0.5=8分音符, 0.25=16分音符")
     g_score.add_argument(
         "--quantize", type=float, default=0.0, metavar="BEATS",
         help="クオンタイズグリッド（拍）。0=無効, 0.25=16分音符, 0.5=8分音符, 1.0=4分音符",
@@ -148,7 +148,7 @@ def main() -> None:
         use_tmpdir = True
 
     try:
-        # URL の場合はまずダウンロード
+        # URL の場合はまたダウンロード
         if is_url:
             print(f"[ダウンロード] {args.video}")
             video_path = _download_video(args.video, work_dir)

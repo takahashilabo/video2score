@@ -59,7 +59,7 @@ def _find_musescore() -> str | None:
 # MIDI 前処理
 # ---------------------------------------------------------------------------
 
-def _shorten_notes(midi_path: str, output_path: str, max_beats: float = 1.0) -> None:
+def _shorten_notes(midi_path: str, output_path: str, max_beats: float = 0.5) -> None:
     """音符の長さを max_beats 拍に制限する（長い伸ばし記号を抑制）。"""
     mid = mido.MidiFile(midi_path)
     tpb = mid.ticks_per_beat
@@ -177,7 +177,7 @@ def _quantize_midi(midi_path: str, output_path: str, grid_beats: float = 0.25) -
     out.save(output_path)
 
 
-def _prepare_midi(midi_path: str, output_path: str, max_beats: float = 1.0,
+def _prepare_midi(midi_path: str, output_path: str, max_beats: float = 0.5,
                   quantize: float = 0.0) -> None:
     """音符を短縮し、MuseScore が適切なト音/ヘ音記号を割り当てるよう
     右手 = Violin (program 40)、左手 = Cello (program 42) を設定する。
@@ -349,7 +349,7 @@ def _export_verovio(midi_path: str, output_path: str) -> bool:
 def fix_and_export(
     midi_path: str,
     output_path: str,
-    max_beats: float = 1.0,
+    max_beats: float = 0.5,
     quantize: float = 0.0,
 ) -> None:
     """piano.mid (2トラック) → PDF 楽譜のメインパイプライン。
@@ -357,7 +357,7 @@ def fix_and_export(
     Args:
         midi_path:   入力 MIDI ファイル（右手 ch0 + 左手 ch1）
         output_path: 出力 PDF ファイルパス
-        max_beats:   最大音符長（拍）。デフォルト 1.0 = 四分音符まで
+        max_beats:   最大音符長（拍）。デフォルト 0.5 = 8分音符まで（タイを抑制）
         quantize:    クオンタイズグリッド（拍）。0 で無効。
                      例: 0.25 = 16分音符, 0.5 = 8分音符, 1.0 = 4分音符
     """
@@ -401,8 +401,8 @@ def main() -> None:
     )
     parser.add_argument("--input", default="piano.mid", help="入力 MIDI ファイル")
     parser.add_argument("--out", default="piano.pdf", help="出力 PDF ファイル")
-    parser.add_argument("--max-beats", type=float, default=1.0,
-                        help="最大音符長（拍）")
+    parser.add_argument("--max-beats", type=float, default=0.5,
+                        help="最大音符長（拍）。小さいほどタイが減りスッキリした譜面になる")
     parser.add_argument(
         "--quantize", type=float, default=0.0, metavar="BEATS",
         help="クオンタイズグリッド（拍）。0=無効, 0.25=16分音符, 0.5=8分音符, 1.0=4分音符",
