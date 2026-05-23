@@ -67,52 +67,52 @@ def _shorten_notes(midi_path: str, output_path: str, max_beats: float = 0.5) -> 
     out = mido.MidiFile(ticks_per_beat=tpb)
 
     for track in mid.tracks:
-        # 絶対 tick に変換
         events: list[list] = []
         abs_tick = 0
         for msg in track:
             abs_tick += msg.time
             events.append([abs_tick, msg.copy(time=0)])
 
-        # 長すぎるノートに早期 note_off を挿入
-        note_on_at: dict[tuple, int] = {}
+        # FIFO リストで同一ピッチの重複音符を正しく追跡する
+        note_on_at: dict[tuple, list[int]] = {}
         extra_offs: list[list] = []
 
         for abs_t, msg in events:
             if msg.type == "note_on" and msg.velocity > 0:
-                note_on_at[(msg.channel, msg.note)] = abs_t
+                key = (msg.channel, msg.note)
+                note_on_at.setdefault(key, []).append(abs_t)
             elif msg.type == "note_off" or (msg.type == "note_on" and msg.velocity == 0):
                 key = (msg.channel, msg.note)
-                if key in note_on_at:
-                    duration = abs_t - note_on_at.pop(key)
+                if note_on_at.get(key):
+                    on_t = note_on_at[key].pop(0)
+                    duration = abs_t - on_t
                     if duration > max_ticks:
-                        early = abs_t - duration + max_ticks
                         extra_offs.append([
-                            early,
+                            on_t + max_ticks,
                             mido.Message("note_off", channel=msg.channel,
                                          note=msg.note, velocity=0, time=0),
                         ])
 
         all_events = events + extra_offs
-        # note_off を note_on より先にソート（同一 tick の場合）
         all_events.sort(key=lambda e: (e[0], 1 if (e[1].type == "note_on" and e[1].velocity > 0) else 0))
 
         out_track = mido.MidiTrack()
         out.tracks.append(out_track)
 
-        active: set = set()
+        # set ではなく Counter で同一ピッチの重複を正しく数える
+        active: dict[tuple, int] = {}
         cur = 0
         for abs_t, msg in all_events:
             delta = abs_t - cur
             key = (getattr(msg, "channel", None), getattr(msg, "note", None))
 
             if msg.type == "note_on" and msg.velocity > 0:
-                active.add(key)
+                active[key] = active.get(key, 0) + 1
                 out_track.append(msg.copy(time=delta))
                 cur = abs_t
             elif msg.type == "note_off" or (msg.type == "note_on" and msg.velocity == 0):
-                if key in active:
-                    active.discard(key)
+                if active.get(key, 0) > 0:
+                    active[key] -= 1
                     out_track.append(msg.copy(time=delta))
                     cur = abs_t
             else:
@@ -137,34 +137,41 @@ def _quantize_midi(midi_path: str, output_path: str, grid_beats: float = 0.25) -
     out = mido.MidiFile(ticks_per_beat=tpb)
 
     for track in mid.tracks:
-        events: list[list] = []
+        events: list[tuple] = []
         abs_tick = 0
         for msg in track:
             abs_tick += msg.time
-            events.append([abs_tick, msg.copy(time=0)])
+            events.append((abs_tick, msg.copy(time=0)))
 
-        # list を使って同じ音程の反復音を FIFO で正しく対応する
-        note_orig_on: dict[tuple, list[int]] = {}
-        note_snapped_on: dict[tuple, list[int]] = {}
-        new_events: list[list] = []
+        # ノートを (start, end, note, channel, velocity) のタプルに分解する
+        # → ペアが明確なので重複音符でも正しく処理できる
+        notes: list[tuple] = []
+        non_note: list[tuple] = []
+        pending: dict[tuple, list[tuple]] = {}
 
         for abs_t, msg in events:
             if msg.type == "note_on" and msg.velocity > 0:
                 key = (msg.channel, msg.note)
-                snapped = round(abs_t / grid) * grid
-                note_orig_on.setdefault(key, []).append(abs_t)
-                note_snapped_on.setdefault(key, []).append(snapped)
-                new_events.append([snapped, msg])
+                pending.setdefault(key, []).append((abs_t, msg.velocity))
             elif msg.type == "note_off" or (msg.type == "note_on" and msg.velocity == 0):
                 key = (msg.channel, msg.note)
-                if note_orig_on.get(key):
-                    orig_on = note_orig_on[key].pop(0)
-                    snapped_on = note_snapped_on[key].pop(0)
-                    new_events.append([snapped_on + (abs_t - orig_on), msg])
-                else:
-                    new_events.append([abs_t, msg])
+                if pending.get(key):
+                    start_t, vel = pending[key].pop(0)
+                    notes.append((start_t, abs_t, msg.note, msg.channel, vel))
             else:
-                new_events.append([abs_t, msg])
+                non_note.append((abs_t, msg))
+
+        # start のみグリッドにスナップし、end は元との相対関係を保つ
+        new_events: list[tuple] = list(non_note)
+        for start, end, pitch, ch, vel in notes:
+            snapped_start = round(start / grid) * grid
+            snapped_end = max(end, snapped_start + 1)
+            new_events.append((snapped_start,
+                                mido.Message("note_on", channel=ch, note=pitch,
+                                             velocity=vel, time=0)))
+            new_events.append((snapped_end,
+                                mido.Message("note_off", channel=ch, note=pitch,
+                                             velocity=0, time=0)))
 
         new_events.sort(key=lambda e: (e[0], 1 if (e[1].type == "note_on" and e[1].velocity > 0) else 0))
 
